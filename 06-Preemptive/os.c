@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include "reg.h"
 #include "asm.h"
+#include "host.h"
 
 /* Size of our user task stacks in words */
 #define STACK_SIZE	256
@@ -20,6 +21,9 @@
 
 /* 100 ms per tick. */
 #define TICK_RATE_HZ 10
+
+int handle;
+int tickcount = 0;
 
 void usart_init(void)
 {
@@ -109,6 +113,126 @@ void task2_func(void)
 	}
 }
 
+void semi_func(void){
+//	signed int handle, error;
+	
+	print_str("Implements semihosting!!\n");
+	handle = host_action(SYS_SYSTEM, "mkdir -p output");
+	handle = host_action(SYS_SYSTEM, "touch output/tasklog.txt");
+	handle = host_action(SYS_OPEN, "output/tasklog.txt", 4);
+	if(handle == -1){
+		print_str("open file error !!\n");
+	}
+	syscall();
+	while(1){
+		print_str("semihosting : Running...\n");
+		delay(1000);
+	}
+}
+
+void write(char *buf, int len){
+	host_action(SYS_WRITE, handle, (void *)buf, len);
+}
+
+unsigned int get_reload(){
+	return *SYSTICK_LOAD;
+}
+
+unsigned int get_current(){
+	return *SYSTICK_VAL;
+}
+
+unsigned int get_time(){
+//    static const unsigned int scale = 1000000 / configTICK_RATE_HZ;
+                    /* microsecond */
+    static const unsigned int scale = 1000;
+
+	return tickcount * scale +
+           ((float)*SYSTICK_LOAD - (float)*SYSTICK_VAL) / ((float)*SYSTICK_LOAD / scale);
+}
+
+int _snprintf_int(int num, char *buf, int buf_size)
+{
+	int len = 1;
+	char *p;
+	int i = num < 0 ? -num : num;
+
+	for (; i >= 10; i /= 10, len++);
+
+	if (num < 0)
+		len++;
+
+	i = num;
+	p = buf + len - 1;
+	do {
+		if (p < buf + buf_size)
+			*p-- = '0' + i % 10;
+		i /= 10;
+	} while (i != 0);
+
+	if (num < 0)
+		*p = '-';
+
+	return len < buf_size ? len : buf_size;
+}
+
+int snprintf(char *buf, size_t size, const char *format, ...)
+{
+	va_list ap;
+	char *dest = buf;
+	char *last = buf + size;
+	char ch;
+
+	va_start(ap, format);
+	for (ch = *format++; dest < last && ch; ch = *format++) {
+		if (ch == '%') {
+			ch = *format++;
+			switch (ch) {
+			case 's' : {
+					char *str = va_arg(ap, char*);
+					/* strncpy */
+					while (dest < last) {
+						if ((*dest = *str++))
+							dest++;
+						else
+							break;
+					}
+				}
+				break;
+			case 'd' : {
+					int num = va_arg(ap, int);
+					dest += _snprintf_int(num, dest,
+					                      last - dest);
+				}
+				break;
+			case '%' :
+				*dest++ = ch;
+				break;
+			default :
+				return -1;
+			}
+		} else {
+			*dest++ = ch;
+		}
+	}
+	va_end(ap);
+
+	if (dest < last)
+		*dest = 0;
+	else
+		*--dest = 0;
+
+	return dest - buf;
+}
+
+void task_switch_time(){
+	
+//	char *s = "switch\n";
+	char buf[128];
+	int len = snprintf(buf, 128, "switch task : time reload is = %d\n\r time current is = %d\n\r get time is = %d\n", get_reload(), get_current(), get_time());
+	write(buf,len);
+}
+
 int main(void)
 {
 	unsigned int user_stacks[TASK_LIMIT][STACK_SIZE];
@@ -125,11 +249,16 @@ int main(void)
 	print_str("OS: Back to OS, create task 2\n");
 	usertasks[1] = create_task(user_stacks[1], &task2_func);
 	task_count += 1;
+	print_str("OS: Back to OS, create task 3\n");
+	usertasks[2] = create_task(user_stacks[2], &semi_func);
+	task_count += 1;
 
 	print_str("\nOS: Start round-robin scheduler!\n");
 
 	/* SysTick configuration */
 	*SYSTICK_LOAD = (CPU_CLOCK_HZ / TICK_RATE_HZ) - 1UL;
+
+	*SYSTICK_LOAD = 720000;//7200000;
 	*SYSTICK_VAL = 0;
 	*SYSTICK_CTRL = 0x07;
 	current_task = 0;
@@ -140,6 +269,9 @@ int main(void)
 		print_str("OS: Back to OS\n");
 
 		current_task = current_task == (task_count - 1) ? 0 : current_task + 1;
+		tickcount ++;
+
+//		usertasks[2] = create_task(user_stacks[2], &semi_func);
 	}
 
 	return 0;

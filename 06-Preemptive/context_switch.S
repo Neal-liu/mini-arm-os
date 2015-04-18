@@ -4,6 +4,7 @@
 .global svc_handler
 .type systick_handler, %function
 .global systick_handler
+.extern task_switch_time
 svc_handler:
 systick_handler:
 	/* save user state */
@@ -29,7 +30,11 @@ activate:
 	isb
 
 	/* load user state */
-	pop {r4, r5, r6, r7, r8, r9, r10, r11, lr}
+//	pop {r4, r5, r6, r7, r8, r9, r10, r11, lr}
+	pop {r4, r5, r6, r7, r8, r9, r10, r11}
+
+	bl task_switch_time
+	pop {lr}
 
 	/* jump to user task */
 	bx lr

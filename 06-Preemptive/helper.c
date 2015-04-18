@@ -37,28 +37,28 @@ int snprintf(char *buf, size_t size, const char *format, ...)
 		if (ch == '%') {
 			ch = *format++;
 			switch (ch) {
-			case 's' : {
-					char *str = va_arg(ap, char*);
-					/* strncpy */
-					while (dest < last) {
-						if ((*dest = *str++))
-							dest++;
-						else
-							break;
-					}
-				}
-				break;
-			case 'd' : {
-					int num = va_arg(ap, int);
-					dest += _snprintf_int(num, dest,
-					                      last - dest);
-				}
-				break;
-			case '%' :
-				*dest++ = ch;
-				break;
-			default :
-				return -1;
+				case 's' : {
+							   char *str = va_arg(ap, char*);
+							   /* strncpy */
+							   while (dest < last) {
+								   if ((*dest = *str++))
+									   dest++;
+								   else
+									   break;
+							   }
+						   }
+						   break;
+				case 'd' : {
+							   int num = va_arg(ap, int);
+							   dest += _snprintf_int(num, dest,
+									   last - dest);
+						   }
+						   break;
+				case '%' :
+						   *dest++ = ch;
+						   break;
+				default :
+						   return -1;
 			}
 		} else {
 			*dest++ = ch;
@@ -73,3 +73,25 @@ int snprintf(char *buf, size_t size, const char *format, ...)
 
 	return dest - buf;
 }
+
+char* itoa(int i, char b[]){
+	char const digit[] = "0123456789";
+	char* p = b;
+	if(i<0){
+		*p++ = '-';
+		i *= -1;
+	}
+	int shifter = i;
+	do{ //Move to where representation ends
+		++p;
+		shifter = shifter/10;
+	}while(shifter);
+	*p = '\0';
+	do{ //Move back, inserting digits as u go
+		*--p = digit[i%10];
+		i = i/10;
+	}while(i);
+	return b;
+}
+
+

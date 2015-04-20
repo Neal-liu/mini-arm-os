@@ -4,7 +4,7 @@
 #include "reg.h"
 #include "asm.h"
 #include "host.h"
-#include "helper.c"
+#include "clib.c"
 
 /* Size of our user task stacks in words */
 #define STACK_SIZE	256
@@ -192,17 +192,17 @@ unsigned int get_current(){
 unsigned int get_time(){
 //    static const unsigned int scale = 1000000 / configTICK_RATE_HZ;
                     /* microsecond */
-    static const unsigned int scale = 1000;
+//    static const unsigned int scale = 1000;
 
-	return tickcount * scale +
-           ((float)*SYSTICK_LOAD - (float)*SYSTICK_VAL) / ((float)*SYSTICK_LOAD / scale);
+	return tickcount*(*SYSTICK_LOAD) + (*SYSTICK_LOAD-*SYSTICK_VAL);
+//	return tickcount * scale +
+//           ((float)*SYSTICK_LOAD - (float)*SYSTICK_VAL) / ((float)*SYSTICK_LOAD / scale);
 }
 void task_switch_time(){
 	
-//	char *s = "switch\n";
-//	char buf[128];
-//	int len = snprintf(buf, 128, "switch task : time reload is = %d\n\r time current is = %d\n\r get time is = %d\n", get_reload(), get_current(), get_time());
-//	write(buf,len);
+	char buf[128];
+	int len = snprintf(buf, 128, "task switch in  : get time is = %d\n", get_time());
+	write(buf,len);
 }
 
 int main(void)
@@ -213,6 +213,7 @@ int main(void)
 //	size_t current_task;
 	int temp, biggest = 0, biggestnumber, i;
 	char t[10];
+	char buf[128];
 	unsigned int priorityTasks[TASK_LIMIT] = {0};
 	unsigned int RRtasks[TASK_LIMIT];
 
@@ -235,8 +236,9 @@ int main(void)
 //	*SYSTICK_LOAD = (CPU_CLOCK_HZ / TICK_RATE_HZ) - 1UL;
 
 //	*SYSTICK_LOAD = 720000;//7200000;
-	*SYSTICK_LOAD = 7200000;//7200000;
+//	*SYSTICK_LOAD = 7200000;//7200000;
 
+	*SYSTICK_LOAD = 720000;//7200000;
 	*SYSTICK_VAL = 0;
 	*SYSTICK_CTRL = 0x07;
 //	current_task = 0;
@@ -279,11 +281,15 @@ int main(void)
 			biggest = 0;
 			RRtasks[biggestnumber] = 0;		// I just want this task's priority be very small.
 		}
+		
+		tickcount ++;
+		int len = snprintf(buf, 128, "task switch out : get time is = %d\n", get_time());
+		write(buf,len);
+
 //		usertasks[current_task] = activate(usertasks[current_task]);
 		print_str("OS: Back to OS\n");
 
 //		current_task = current_task == (task_count - 1) ? 0 : current_task + 1;
-		tickcount ++;
 	}
 
 	return 0;

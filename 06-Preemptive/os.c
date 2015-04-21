@@ -10,7 +10,7 @@
 #define STACK_SIZE	256
 
 /* Number of user task */
-#define TASK_LIMIT	3
+#define TASK_LIMIT	5
 
 /* USART TXE Flag
  * This flag is cleared when data is written to USARTx_DR and
@@ -26,7 +26,25 @@
 
 int handle;
 int tickcount = 0;
-int task_number = 0;
+
+typedef enum Task_state{
+	waiting,
+	running,
+	ready,
+	suspended,
+	created
+}task_state;
+
+typedef struct list{
+	const char *task_name;
+	unsigned int priority;
+	unsigned int *task_address;
+	unsigned int user_stack[STACK_SIZE];
+	task_state state;
+}xList;
+
+xList user_task[TASK_LIMIT];
+static unsigned int scheduler_initial_flag = 1;
 
 void usart_init(void)
 {
@@ -61,23 +79,6 @@ void delay(volatile int count)
 	while (count--);
 }
 
-void print_tick(int number){ 
-	int i = 0, j, Tick_NOW = number ;
-	char buf[16], str[16] = "tick=0\n"; 
-
-	if (Tick_NOW != 0){
-		while (Tick_NOW != 0){ 
-			buf[i++] = (char)((Tick_NOW % 10) + '0'); 
-			Tick_NOW /= 10;
-		}
-		for (j = 0; j < i; j++){
-			str[j + 5] = buf[i - 1 - j]; 
-		}
-		str[j + 5] = '\n'; 
-		str[j + 6] = 0; 
-	} 
-	print_str(str);
-}
 
 /* Exception return behavior */
 #define HANDLER_MSP	0xFFFFFFF1
@@ -94,45 +95,33 @@ void print_tick(int number){
  * works correctly.
  * http://infocenter.arm.com/help/index.jsp?topic=/com.arm.doc.dui0552a/Babefdjc.html
  */
-unsigned int *create_task(unsigned int *stack, void (*start)(void), int priority)
+unsigned int *create_task(unsigned int *stack, void (*start)(void), unsigned int priority, const char *name, size_t task_count)
 {
 	static int first = 1;
 
 	stack += STACK_SIZE - 34; //- 32; /* End of stack, minus what we are about to push */
 	if (first) {
 		stack[8] = (unsigned int) start;
-		stack[9] = priority;
 		first = 0;
 	} else {
 		stack[8] = (unsigned int) THREAD_PSP;
 		stack[15] = (unsigned int) start;
 		stack[16] = (unsigned int) 0x01000000; /* PSR Thumb bit */
-		stack[17] = priority;
 	}
 
-//	print_tick(*(stack+15));
-//	print_tick(*(stack+17));
 
-	char ss1[10];
-	char ss2[10];
-	int temp1, temp2;
-	temp1 = *(stack+9);
-	itoa(temp1,ss1);
-	temp2 = *(stack+17);
-	itoa(temp2,ss2);
-	if(temp2 == 0){
-		print_str("task1's priority is ");
-		print_str(ss1);
-		print_str("\n");
-	}
-	else if (temp1 == 0){
-		print_str("task's priority is ");
-		print_str(ss2);
-		print_str("\n");
-	}
+	user_task[task_count].state = created;
+	user_task[task_count].priority = priority;
+	user_task[task_count].task_name = name;
 
-	task_number++;
 	stack = activate(stack);
+	user_task[task_count].state = ready;
+
+	char s[10];
+	itoa(user_task[task_count].priority,s);
+	print_str("task's priority is ");
+	print_str(s);
+	print_str("\n");
 
 	return stack;
 }
@@ -144,7 +133,8 @@ void task1_func(void)
 	print_str("task1: Now, return to kernel mode\n");
 	syscall();
 	while (1) {
-		print_str("task1: Running...\n");
+		print_str(user_task[0].task_name);
+		print_str(" : Running...\n");
 		delay(1000);
 	}
 }
@@ -155,41 +145,53 @@ void task2_func(void)
 	print_str("task2: Now, return to kernel mode\n");
 	syscall();
 	while (1) {
-		print_str("task2: Running...\n");
+		print_str(user_task[1].task_name);
+		print_str(" : Running...\n");
 		delay(1000);
 	}
 }
 
-void semi_func(void){
-//	signed int handle, error;
-	
-	print_str("Implements semihosting!!\n");
-	handle = host_action(SYS_SYSTEM, "mkdir -p output");
-	handle = host_action(SYS_SYSTEM, "touch output/tasklog.txt");
-	handle = host_action(SYS_OPEN, "output/tasklog.txt", 4);
-	if(handle == -1){
-		print_str("open file error !!\n");
-	}
+void task3_func(void)
+{
+	print_str("task3: Created!\n");
+	print_str("task3: Now, return to kernel mode\n");
 	syscall();
-	while(1){
-		print_str("semihosting : Running...\n");
+	while (1) {
+		print_str(user_task[2].task_name);
+		print_str(" : Running...\n");
 		delay(1000);
 	}
 }
 
-void write(char *buf, int len){
+void task4_func(void)
+{
+	print_str("task4: Created!\n");
+	print_str("task4: Now, return to kernel mode\n");
+	syscall();
+	while (1) {
+		print_str(user_task[3].task_name);
+		print_str(" : Running...\n");
+		delay(1000);
+	}
+}
+
+void write(char *buf, int len)
+{
 	host_action(SYS_WRITE, handle, (void *)buf, len);
 }
 
-unsigned int get_reload(){
+unsigned int get_reload()
+{
 	return *SYSTICK_LOAD;
 }
 
-unsigned int get_current(){
+unsigned int get_current()
+{
 	return *SYSTICK_VAL;
 }
 
-unsigned int get_time(){
+unsigned int get_time()
+{
 //    static const unsigned int scale = 1000000 / configTICK_RATE_HZ;
                     /* microsecond */
 //    static const unsigned int scale = 1000;
@@ -198,39 +200,90 @@ unsigned int get_time(){
 //	return tickcount * scale +
 //           ((float)*SYSTICK_LOAD - (float)*SYSTICK_VAL) / ((float)*SYSTICK_LOAD / scale);
 }
-void task_switch_time(){
-	
+
+/* calculate timestamp of task switching and implement it with semihosting. */
+void task_switch_time()
+{
 	char buf[128];
-	int len = snprintf(buf, 128, "task switch in  : get time is = %d\n", get_time());
+	int len = snprintf(buf, 128, "task switch in : get time is = %d\n", get_time());
 	write(buf,len);
 }
 
-int main(void)
+void task_scheduler(xList tasks[], size_t task_number)
 {
-	unsigned int user_stacks[TASK_LIMIT][STACK_SIZE];
-	unsigned int *usertasks[TASK_LIMIT];
-	size_t task_count = 0;
-//	size_t current_task;
-	int temp, biggest = 0, biggestnumber, i;
-	char t[10];
+	int maximum = 0, max_number, i;
 	char buf[128];
 	unsigned int priorityTasks[TASK_LIMIT] = {0};
 	unsigned int RRtasks[TASK_LIMIT];
 
+	while (1) {
+
+		if(scheduler_initial_flag == 1){
+			for(i = 0 ; i < task_number ; i++){
+				priorityTasks[i] = tasks[i].priority;
+				if(tasks[i].priority >= maximum){
+					maximum = tasks[i].priority;
+					max_number = i;
+				}
+			}
+			scheduler_initial_flag = 0;
+		}
+
+		print_str("OS: Activate next task\n");
+
+		if(tickcount % task_number == 0){
+			for(i=0 ; i<task_number ; i++)
+				RRtasks[i] = priorityTasks[i];
+		}
+
+		for(i=0 ; i<task_number ; i++){
+			if(RRtasks[i] >= maximum){
+				maximum = RRtasks[i];
+				max_number = i;
+			}
+		}
+		if(tasks[max_number].state == ready)
+		{
+			tasks[max_number].state = running;
+			tasks[max_number].task_address = activate(tasks[max_number].task_address);
+		}
+		if(tasks[max_number].state == running)
+			tasks[max_number].state = ready;	
+
+		maximum = 0;
+		RRtasks[max_number] = 0;		// set task's priority be the smallest.
+
+		tickcount ++;
+		int len = snprintf(buf, 128, "task switch out : get time is = %d\n", get_time());
+		write(buf,len);
+
+		print_str("OS: Back to OS\n");
+	}
+
+}
+
+int main(void)
+{
+	size_t task_count = 0;
+
 	usart_init();
 
+	handle = host_action(SYS_OPEN, "output/tasklog.txt", 6);
 	print_str("OS: Starting...\n");
 	print_str("OS: First create task 1\n");
-	usertasks[0] = create_task(user_stacks[0], &task1_func, 4);
+	user_task[task_count].task_address = create_task(user_task[task_count].user_stack, &task1_func, 3, "taskName 1", task_count);
 	task_count += 1;
 	print_str("OS: Back to OS, create task 2\n");
-	usertasks[1] = create_task(user_stacks[1], &task2_func, 2);
+	user_task[task_count].task_address = create_task(user_task[task_count].user_stack, &task2_func, 4, "taskName 2", task_count);
 	task_count += 1;
 	print_str("OS: Back to OS, create task 3\n");
-	usertasks[2] = create_task(user_stacks[2], &semi_func, 3);
+	user_task[task_count].task_address = create_task(user_task[task_count].user_stack, &task3_func, 5, "taskName 3", task_count);
+	task_count += 1;
+	print_str("OS: Back to OS, create task 4\n");
+	user_task[task_count].task_address = create_task(user_task[task_count].user_stack, &task4_func, 1, "taskName 4", task_count);
 	task_count += 1;
 
-	print_str("\nOS: Start round-robin scheduler!\n");
+	print_str("\nOS: Start priority-based scheduling!\n");
 
 	/* SysTick configuration */
 //	*SYSTICK_LOAD = (CPU_CLOCK_HZ / TICK_RATE_HZ) - 1UL;
@@ -238,59 +291,11 @@ int main(void)
 //	*SYSTICK_LOAD = 720000;//7200000;
 //	*SYSTICK_LOAD = 7200000;//7200000;
 
-	*SYSTICK_LOAD = 720000;//7200000;
+	*SYSTICK_LOAD = 7200000;//7200000;
 	*SYSTICK_VAL = 0;
 	*SYSTICK_CTRL = 0x07;
-//	current_task = 0;
 
-	while (1) {
-		print_str("OS: Activate next task\n");
-
-		if(tickcount == 0){
-			for(i=0 ; i<task_number ; i++){
-				temp = *(usertasks[i]+19);
-				itoa(temp,t);
-				print_str("priority is = ");
-				print_str(t);
-				print_str("\n");
-				priorityTasks[i] = temp;
-				if(temp >= biggest){
-					biggest = temp;
-					biggestnumber = i;
-				}
-			}
-			usertasks[biggestnumber] = activate(usertasks[biggestnumber]);
-		}
-		else{
-			if(tickcount % task_number == 1){
-				for(i=0 ; i<task_number ; i++)
-					RRtasks[i] = priorityTasks[i];
-			}
-
-			for(i=0 ; i<task_number ; i++){
-//				char s[10];
-//				itoa(RRtasks[i],s);
-//				print_str(s);
-//				print_str("\n");
-				if(RRtasks[i] >= biggest){
-					biggest = RRtasks[i];
-					biggestnumber = i;
-				}
-			}
-			usertasks[biggestnumber] = activate(usertasks[biggestnumber]);
-			biggest = 0;
-			RRtasks[biggestnumber] = 0;		// I just want this task's priority be very small.
-		}
-		
-		tickcount ++;
-		int len = snprintf(buf, 128, "task switch out : get time is = %d\n", get_time());
-		write(buf,len);
-
-//		usertasks[current_task] = activate(usertasks[current_task]);
-		print_str("OS: Back to OS\n");
-
-//		current_task = current_task == (task_count - 1) ? 0 : current_task + 1;
-	}
+	task_scheduler(user_task, task_count);
 
 	return 0;
 }
